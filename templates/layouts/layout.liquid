@@ -1,0 +1,21 @@
+<!doctype html>
+<html class="no-js" lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Foundation 5 Starter for IE8</title>
+  		{{ "app.css" | asset_url | stylesheet_tag }}
+  		<script src="{{ "modernizr.js" | asset_url }}"></script>
+  		<!--[if lt IE 9]>
+		  <script src="{{ "html5shiv.js" | asset_url }}"></script>
+		  <script src="{{ "nwmatcher-1.2.5.js" | asset_url }}"></script>
+		  <script src="{{ "selectivizr-1.0.3b.js" | asset_url }}"></script>
+		  <script src="{{ "respond.js" | asset_url }}"></script>
+		<![endif]-->
+	</head>
+	<body>
+		{% block content %}{% endblock %}
+  		{% include "scripts" %}
+  		<script src="{{ "rem.min.js" | asset_url }}"></script>
+	</body>
+</html>
