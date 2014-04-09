@@ -8,51 +8,67 @@
         return (/rem/).test(div.style.fontSize);
     },
 
-    // filter returned link nodes for stylesheets
+    // filter returned links for stylesheets
     isStyleSheet = function () {
         var styles = document.getElementsByTagName('link'),
-            filteredStyles = [];
-            
+            filteredLinks = [];
+
         for ( var i = 0; i < styles.length; i++) {
             if ( styles[i].rel.toLowerCase() === 'stylesheet' && styles[i].getAttribute('data-norem') === null ) {
-                filteredStyles.push( styles[i] );
+
+                filteredLinks.push( styles[i].href );
             }
         }
 
-        return filteredStyles;
+        return filteredLinks;
     },
-    
-   processSheets = function () {
-        var links = [];
-        sheets = isStyleSheet(); // search for link tags and confirm it's a stylesheet
-        sheets.og = sheets.length; // store the original length of sheets as a property
-        sheets.loaded = 0; // keep track of how many have been loaded so far
-        for( var i = 0; i < sheets.length; i++ ){
-            links[i] = sheets[i].href;
-            xhr( links[i], storeCSS, i );
+
+   processLinks = function () {
+        if( links.length === 0 ){
+            links = isStyleSheet(); // search for link tags and confirm it's a stylesheet
+        }
+
+        //prepare to match each link
+        for( var i = 0; i < links.length; i++ ){
+            xhr( links[i], storeCSS, links[i], i );
         }
     },
 
-    storeCSS = function ( response, i ) {
+    storeCSS = function ( response, link ) {
 
-        preCSS[i] = response;
+        preCSS.push(response.responseText);
+        CSSLinks.push(link);
 
-        if( ++sheets.loaded === sheets.og ){
-            for ( var j = 0; j < preCSS.length; j++ ){
-                matchCSS( preCSS[j] );
+        if( CSSLinks.length === links.length ){
+            for( var j = 0; j <  CSSLinks.length; j++ ){
+                matchCSS( preCSS[j], CSSLinks[j] );
             }
 
-            buildCSS();
+            if( ( links = importLinks.slice(0) ).length > 0 ){ //after finishing all current links, set links equal to the new imports found
+                CSSLinks = [];
+                preCSS = [];
+                importLinks = [];
+                processLinks();
+            } else {
+                buildCSS();
+            }
         }
-
     },
 
-    matchCSS = function ( response ) { // collect all of the rules from the xhr response texts and match them to a pattern
-        var clean = removeComments( removeMediaQueries(response.responseText) ),
-            pattern = /[\w\d\s\-\/\\\[\]:,.'"*()<>+~%#^$_=|@]+\{[\w\d\s\-\/\\%#:;,.'"*()]+\d*\.?\d+rem[\w\d\s\-\/\\%#:;,.'"*()]*\}/g, //find selectors that use rem in one or more of their rules
+    matchCSS = function ( sheetCSS, link ) { // collect all of the rules from the xhr response texts and match them to a pattern
+        var clean = removeComments( removeMediaQueries(sheetCSS) ),
+            pattern = /[\w\d\s\-\/\\\[\]:,.'"*()<>+~%#^$_=|@]+\{[\w\d\s\-\/\\%#:!;,.'"*()]+\d*\.?\d+rem[\w\d\s\-\/\\%#:!;,.'"*()]*\}/g, //find selectors that use rem in one or more of their rules
             current = clean.match(pattern),
             remPattern =/\d*\.?\d+rem/g,
-            remCurrent = clean.match(remPattern);
+            remCurrent = clean.match(remPattern),
+            sheetPathPattern = /(.*\/)/,
+            sheetPath = sheetPathPattern.exec(link)[0], //relative path to css file specified in @import
+            importPattern = /@import (?:url\()?['"]?([^'\)"]*)['"]?\)?[^;]*/gm, //matches all @import variations outlined at: https://developer.mozilla.org/en-US/docs/Web/CSS/@import
+            importStatement;
+
+        while( (importStatement = importPattern.exec(sheetCSS)) !== null ){
+            importLinks.push( sheetPath + importStatement[1] );
+        }
 
         if( current !== null && current.length !== 0 ){
             found = found.concat( current ); // save all of the blocks of rules with rem in a property
@@ -61,7 +77,7 @@
     },
 
     buildCSS = function () { // first build each individual rule from elements in the found array and then add it to the string of rules.
-        var pattern = /[\w\d\s\-\/\\%#:,.'"*()]+\d*\.?\d+rem[\w\d\s\-\/\\%#:,.'"*()]*[;}]/g; // find properties with rem values in them
+        var pattern = /[\w\d\s\-\/\\%#:,.'"*()]+\d*\.?\d+rem[\w\d\s\-\/\\%#:!,.'"*()]*[;}]/g; // find properties with rem values in them
         for( var i = 0; i < found.length; i++ ){
             rules = rules + found[i].substr(0,found[i].indexOf("{")+1); // save the selector portion of each rule with a rem value
             var current = found[i].match( pattern );
@@ -77,10 +93,8 @@
     },
 
     parseCSS = function () { // replace each set of parentheses with evaluated content
-    var remSize;
         for( var i = 0; i < foundProps.length; i++ ){
-            remSize = parseFloat(foundProps[i].substr(0,foundProps[i].length-3));
-            css[i] = Math.round( remSize * fontSize ) + 'px';
+            css[i] = Math.round( parseInt(foundProps[i].substr(0,foundProps[i].length-3)*fontSize, 10) ) + 'px';
         }
 
         loadCSS();
@@ -104,6 +118,7 @@
     },
 
     xhr = function ( url, callback, i ) { // create new XMLHttpRequest object and run it
+
         try {
             var xhr = getXMLHttpRequest();
             xhr.open( 'GET', url, true );
@@ -119,7 +134,7 @@
                 );
             return v > 4 ? v : undef;
             }());
-            
+
             if ( ie >= 7 ){ //If IE is greater than 6
                 // This targets modern browsers and modern versions of IE,
                 // which don't need the "new" keyword.
@@ -167,7 +182,7 @@
         if (window.matchMedia || window.msMatchMedia) { return true; }
         return false;
     },
-    
+
     // Remove queries.
     removeMediaQueries = function(css) {
         if (!mediaQuery()) {
@@ -197,14 +212,17 @@
 
     if( !cssremunit() ){ // this checks if the rem value is supported
         var rules = '', // initialize the rules variable in this scope so it can be used later
-            sheets = [], // initialize the array holding the sheets for use later
+            links = [], // initialize the array holding the sheets urls for use later
+            importLinks = [], //initialize the array holding the import sheet urls for use later
             found = [], // initialize the array holding the found rules for use later
             foundProps = [], // initialize the array holding the found properties for use later
             preCSS = [], // initialize array that holds css before being parsed
+            CSSLinks = [], //initialize array holding css links returned from xhr
             css = [], // initialize the array holding the parsed rules for use later
             body = document.getElementsByTagName('body')[0],
             fontSize = '';
-        if (body.currentStyle) {
+
+        if ( !!body.currentStyle ) {
             if ( body.currentStyle.fontSize.indexOf("px") >= 0 ) {
                 fontSize = body.currentStyle.fontSize.replace('px', '');
             } else if ( body.currentStyle.fontSize.indexOf("em") >= 0 ) {
@@ -217,7 +235,7 @@
         } else if (window.getComputedStyle) {
             fontSize = document.defaultView.getComputedStyle(body, null).getPropertyValue('font-size').replace('px', ''); // find font-size in body element
         }
-        processSheets();
+        processLinks();
     } // else { do nothing, you are awesome and have REM support }
 
 })(window);
